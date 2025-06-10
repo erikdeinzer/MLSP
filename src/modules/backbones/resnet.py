@@ -1,7 +1,7 @@
 from .utils import BasicBlock
 from torch import nn
 
-from src.models.backbones.utils import BasicBlock
+from src.modules.backbones.utils import BasicBlock
 
 class ResNet(nn.Module):
 
@@ -70,3 +70,13 @@ class ResNet(nn.Module):
             layers_list.append(BasicBlock(out_channels, out_channels, **kwargs))
 
         return layers_list
+
+    def describe(self):
+        """
+        Describe the ResNet model architecture.
+        
+        Returns:
+            str: Description of the model architecture.
+        """
+        description = f"ResNet(idims={self.idims}, odims={self.out_feat}, arch={self.arch}, base_dims={self.base_dims})\n"
+        return description

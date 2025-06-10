@@ -61,3 +61,11 @@ class FFN(nn.Module):
         
         return nn.Sequential(*layers)
         
+    def describe(self):
+        """
+        Get a string description of the FFN model.
+
+        Returns:
+            str: Description of the model.
+        """
+        return f"FFN(idims={self.idims}, odims={self.odims}, hidden_dims={self.hidden_dims})"
