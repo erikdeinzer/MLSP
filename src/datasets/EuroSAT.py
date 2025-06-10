@@ -31,6 +31,11 @@ class EuroSATDataset(Dataset):
         self.labels = df['Label'].tolist()  
         self.len = len(self.image_paths)
 
+        self.num_classes = len(np.unique(self.labels))
+
+        self.class_names = df['ClassName'].unique()
+        self.class_names = np.unique(self.labels).tolist()
+
     def __len__(self):
         return self.len
 

@@ -1,5 +1,14 @@
 import sys
-def progress_bar(epoch, total_epochs, loss=None, val_loss=None, acc=None, fold=None, bar_width=10):
+def progress_bar(
+                iteration, 
+                total_iterations, 
+                epoch= None, 
+                total_epochs= None, 
+                vars= None,
+                prefix='',
+                postfix='',
+                style='bar',
+                bar_width=10):
         """
         Display a live training progress bar in the console.
         Args:
@@ -11,14 +20,42 @@ def progress_bar(epoch, total_epochs, loss=None, val_loss=None, acc=None, fold=N
             fold (int, optional): Current fold number for K-Fold Cross-Validation.
             bar_width (int, optional): Width of the progress bar.
         """
-        progress = epoch / total_epochs
+        progress = iteration / total_iterations
         filled_len = int(progress * bar_width)
-        bar = "█" * filled_len + '-' * (bar_width - filled_len)
+        progress_vis = None
+        if style == 'bar':
+            progress_vis = "█" * filled_len + '-' * (bar_width - filled_len)
+        elif style == 'arrow':
+            progress_vis = ">" * filled_len + '-' * (bar_width - filled_len)
+        elif style == 'dots':
+            progress_vis = "•" * filled_len + '-' * (bar_width - filled_len)
+        
         s = ''
-        if fold is not None: s += f"Fold {fold} | "
-        s += f"Epoch {epoch:03d}/{total_epochs} | [{bar}] | "
-        if loss is not None: s += f"Train Loss: {loss:.4f} | "
-        if val_loss is not None: s += f"Val Loss: {val_loss:.4f} | "
-        if acc is not None: s += f"Acc: {acc:.4f} | "
+        if prefix: 
+            s += prefix + ' | '
+        if epoch is not None:
+            width = len(str(total_epochs))
+            s += f"Epoch {epoch:0{width}d}/{total_epochs} | "
+        s += f"Iter {iteration}/{total_iterations} | "
+        s += f"[{progress_vis}] | "
+        s += postfix + ' | '
+
+        if vars is not None:
+            for key, value in vars.items():
+                if value is not None:
+                    if isinstance(value, int):
+                        s += f"{key}: {value} | "
+                    elif isinstance(value, float):
+                        if value < 1e-2:
+                            s += f"{key}: {value:.4e} | "
+                        else:
+                            if value < 1:
+                                s += f"{key}: {value:.4f} | "
+                            else:
+                                s += f"{key}: {value:.4f} | "
+                    else:
+                        s += f"{key}: {value} | "
+        s = s.rstrip(' | ')
+        
         sys.stdout.write('\r' + s)
         sys.stdout.flush()
