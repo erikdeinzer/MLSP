@@ -36,7 +36,11 @@ def progress_bar(
         if epoch is not None:
             width = len(str(total_epochs))
             s += f"Epoch {epoch:0{width}d}/{total_epochs} | "
-        s += f"Iter {iteration}/{total_iterations} | "
+
+        if iteration is not None and total_iterations is not None:
+            width = len(str(total_iterations))
+            s += f"Iter {iteration:0{width}d}/{total_iterations} | "
+        
         s += f"[{progress_vis}] | "
         s += postfix + ' | '
 
