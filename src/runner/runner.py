@@ -14,7 +14,7 @@ from src.runner.utils import progress_bar
 import time
 
 class Runner:
-    def __init__(self, model: nn.Module,
+    def __init__(self, model_cfg: dict,
                  loading_cfg: dict,
                  data_cfg: dict,
                  optim_cfg: dict,
@@ -23,7 +23,7 @@ class Runner:
         """
         Initializes the Runner with model, data, and optimizer configurations.
         Args:
-            model (nn.Module): The model to train or evaluate.
+            model_cfg (dict): Configuration for the model (e.g., backbone, head).
             loading_cfg (dict): Configuration for data loading (e.g., batch size).
             data_cfg (dict): Configuration for dataset (e.g., paths, transforms).
             optim_cfg (dict): Configuration for optimizer (e.g., learning rate).
@@ -36,9 +36,24 @@ class Runner:
         self.data_cfg = data_cfg
         self.optim_cfg = optim_cfg
 
+        if 'seed' in kwargs:
+            seed = kwargs['seed']
+            torch.manual_seed(seed)
+            np.random.seed(seed)
+            print(f"Using seed: {seed}")
+        else:
+            seed = torch.initial_seed() & 0xFFFFFFFF
+            torch.manual_seed(seed)
+            np.random.seed(seed)
+            print(f"No seed provided, using initial seed: {seed}")
+
         
         self.device = torch.device(device)
-        self.model  = model.to(self.device)
+
+        self.model = model_cfg['type'](**model_cfg).to(self.device)
+        self.model.print_param_summary()
+
+        
         self.optimizer = torch.optim.Adam(self.model.parameters(), **optim_cfg)
         self.criterion = nn.CrossEntropyLoss()
 
@@ -47,20 +62,19 @@ class Runner:
         self.test_data  = EuroSATDataset(**data_cfg, split='test')
 
         self.batch_size = loading_cfg['batch_size']
+
+       
         if work_dir:
             timestamp = time.strftime("%Y%m%d-%H%M%S")
             self.save_dir = os.path.join(work_dir, f"run_{timestamp}")
             os.makedirs(self.save_dir)
             self.save_cfg()
 
-        if 'seed' in kwargs:
-            seed = kwargs['seed']
-            torch.manual_seed(seed)
-            np.random.seed(seed)
-            print(f"Using seed: {seed}")
+        
 
         self.history = {'train_loss': [], 'val_loss': [], 'f1': [], 'mean_ap': [], 'ap_per_class': []}
 
+        
     def save_cfg(self, filename='config.yaml'):
         """
         Saves the configuration of the model, optimizer, and dataset to a YAML file.
@@ -125,7 +139,7 @@ class Runner:
         
         
 
-    def _train_loop(self, start, epochs, val_interval, log_interval):
+    def _train_loop(self, start, epochs, val_interval, log_interval, abort_condition=0.05):
         """Main training loop.
         Args:
             start (int): Starting epoch.
@@ -152,9 +166,66 @@ class Runner:
                 self.history['f1'].append(evals['f1'])
                 self.history['mean_ap'].append(evals['mean_ap'])
                 self.history['ap_per_class'].append(evals['ap_per_class'])
-               
-
+            
+            self.plot_metrics() # plot metrics after each epoch
+            progress_indication = abs(min(self.history['train_loss'][-15:]) - self.history['train_loss'][-1])
+            if progress_indication < abort_condition and len(self.history['train_loss']) > 15: break
+            
         return self.history
+    def plot_metrics(self):
+        """
+        Plots training and validation metrics and saves the plot.
+        """
+        epochs = range(1, len(self.history['train_loss']) + 1)
+        
+        # Plot losses
+        fig = plt.figure(figsize=(12, 6))
+        plt.grid(True)
+        plt.plot(epochs, self.history['train_loss'], label='Train Loss', color='blue')
+        plt.plot(epochs, self.history['val_loss'], label='Val Loss', color='orange')
+        plt.title('Training and Validation Loss')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        # Save the plot
+        if self.save_dir:
+            plt.savefig(os.path.join(self.save_dir, 'loss.png'))
+            plt.close()
+        else:
+            plt.show()
+        # Clear the current figure to avoid overlap
+        plt.close(fig)
+
+        
+        # Plot F1 score
+        fig = plt.figure(figsize=(12, 6))
+        plt.grid(True)
+        plt.plot(epochs, self.history['f1'], label='F1 Score', color='green')
+        plt.title('F1 Score')
+        plt.xlabel('Epochs')
+        plt.ylabel('F1 Score')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.save_dir, 'f1.png'))
+        plt.close(fig)
+
+
+        # Plot mAP
+        fig = plt.figure(figsize=(12, 6))
+        plt.grid(True)
+        plt.plot(epochs, self.history['mean_ap'], label='mAP', color='red')
+        plt.title('Mean Average Precision (mAP)')
+        plt.xlabel('Epochs')
+        plt.ylabel('mAP')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.save_dir, 'map.png'))
+        plt.close(fig)
+
+
+
 
     def _train_epoch(self, loader, epoch, total_epochs, log_interval=10):
         """
@@ -219,4 +290,17 @@ class Runner:
             'f1': f1,
             'mean_ap': mean_ap,
             'ap_per_class': ap_per_class
+        }
+    
+    def describe(self):
+        """
+        Returns a description of the model, optimizer, and dataset.
+        """
+        return {
+            'model': self.model.describe(),
+            'optimizer': self.optimizer.__class__.__name__,
+            'loading_cfg': self.loading_cfg,
+            'data_cfg': self.data_cfg,
+            'optim_cfg': self.optim_cfg,
+            'device': str(self.device),
         }

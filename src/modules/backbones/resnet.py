@@ -5,7 +5,7 @@ from src.modules.backbones.utils import BasicBlock
 
 class ResNet(nn.Module):
 
-    def __init__(self, idims, odims, arch, base_dims=32):
+    def __init__(self, idims, odims, arch, base_dims=32, **kwargs):
         """
         ResNet model for image classification.
 
@@ -33,7 +33,7 @@ class ResNet(nn.Module):
         
         ifeat = self.base_dims
         for stage in self.arch:
-            self.layers.extend(self._make_layer(ifeat, ifeat * 2, stage))
+            self.layers.extend(self._make_layer(ifeat, ifeat * 2, stage, **kwargs))
             ifeat *= 2
 
         self.layers.append(nn.Conv2d(in_channels=ifeat, out_channels=self.out_feat, kernel_size=1, stride=1, padding=0, bias=False))

@@ -8,7 +8,7 @@ import torch
 from torch import nn
 
 class BasicBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, stride=1, dropout_rate=None):
+    def __init__(self, in_channels, out_channels, stride=1, dropout_rate=None, **kwargs):
         super(BasicBlock, self).__init__()
         # First conv: 3×3, possibly with stride>1 (for spatial downsampling)
         self.conv1 = nn.Conv2d(
