@@ -2,7 +2,9 @@ from .utils import BasicBlock
 from torch import nn
 
 from src.modules.backbones.utils import BasicBlock
+from src.build.registry import MODULES
 
+@MODULES.register_module()
 class ResNet(nn.Module):
 
     def __init__(self, idims, odims, arch, base_dims=32, **kwargs):

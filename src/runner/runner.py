@@ -4,64 +4,77 @@ import numpy as np
 import os
 import matplotlib.pyplot as plt
 
-from src.evaluators import Evaluator
 from torch.utils.data import DataLoader
-
-from src.datasets import EuroSATDataset
-
 
 from src.runner.utils import progress_bar
 import time
 
+from src.build.registry import MODULES, OPTIMIZERS, DATASETS, EVALUATORS
+from src.build.registry import build_module
+
+
 class Runner:
-    def __init__(self, model_cfg: dict,
-                 loading_cfg: dict,
-                 data_cfg: dict,
-                 optim_cfg: dict,
+    def __init__(self, model: nn.Module | dict,
+                 dataloader_cfg: dict,
+                 dataset: nn.Module | dict,
+                 optim: nn.Module | dict,
                  work_dir: str = None,
-                 device: str = 'cpu', **kwargs):
+                 device: str = 'cpu', 
+                 seed: int = None,
+                 **kwargs):
         """
         Initializes the Runner with model, data, and optimizer configurations.
-        Args:
-            model_cfg (dict): Configuration for the model (e.g., backbone, head).
-            loading_cfg (dict): Configuration for data loading (e.g., batch size).
-            data_cfg (dict): Configuration for dataset (e.g., paths, transforms).
-            optim_cfg (dict): Configuration for optimizer (e.g., learning rate).
-            work_dir (str, optional): Directory to save logs and models.
-            device (str): Device to run the model on ('cpu' or 'cuda').
-            **kwargs: Additional keyword arguments, e.g., seed for reproducibility.
-        """
         
-        self.loading_cfg = loading_cfg
-        self.data_cfg = data_cfg
-        self.optim_cfg = optim_cfg
-
-        if 'seed' in kwargs:
-            seed = kwargs['seed']
+        Args:
+            model (nn.Module | dict): Model configuration or instance.
+            dataloader_cfg (dict): Configuration for DataLoader.
+            dataset (nn.Module | dict): Dataset configuration or instance.
+            optim (nn.Module | dict): Optimizer configuration or instance.
+            work_dir (str, optional): Directory to save model and logs. Defaults to None.
+            device (str, optional): Device to run the model on ('cpu' or 'cuda'). Defaults to 'cpu'.
+            seed (int, optional): Random seed for reproducibility. Defaults to None.
+        """
+        self.model_cfg = model
+        self.dataloader_cfg = dataloader_cfg
+        self.dataset_cfg = dataset
+        self.optim_cfg = optim
+        
+        if seed is not None:
+            if not isinstance(seed, int):
+                raise ValueError("Seed must be an integer.")
             torch.manual_seed(seed)
             np.random.seed(seed)
             print(f"Using seed: {seed}")
         else:
-            seed = torch.initial_seed() & 0xFFFFFFFF
+            seed = torch.initial_seed() & 0xFFFFFFFF #Make the seed a 32-bit integer to work with numpy and torch
             torch.manual_seed(seed)
             np.random.seed(seed)
             print(f"No seed provided, using initial seed: {seed}")
 
-        
+
         self.device = torch.device(device)
 
-        self.model = model_cfg['type'](**model_cfg).to(self.device)
+                
+        self.dataloader_cfg = dataloader_cfg
+        
+        
+        self.model = build_module(self.model_cfg, MODULES).to(self.device)
+
+        self.best_model_path = None  # Placeholder for the best model
+        
+        self.optim = build_module(optim, OPTIMIZERS, params=self.model.parameters())
+
+        datasets = build_module(self.dataset_cfg, DATASETS)  # Build dataset from config
+        self.train_data = datasets.train_data
+        self.val_data = datasets.val_data
+        self.test_data = datasets.test_data
+
+
         self.model.print_param_summary()
 
-        
-        self.optimizer = torch.optim.Adam(self.model.parameters(), **optim_cfg)
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = self.model.criterion
 
-        self.train_data = EuroSATDataset(**data_cfg, split='train')
-        self.val_data   = EuroSATDataset(**data_cfg, split='validation')
-        self.test_data  = EuroSATDataset(**data_cfg, split='test')
-
-        self.batch_size = loading_cfg['batch_size']
+        self.batch_size = self.dataloader_cfg['batch_size']
 
        
         if work_dir:
@@ -84,9 +97,9 @@ class Runner:
         import yaml
         cfg = {
             'model': self.model.describe(),
-            'loading_cfg': self.loading_cfg,
-            'data_cfg': self.data_cfg,
-            'optim_cfg': self.optim_cfg,
+            'dataloader_cfg': self.dataloader_cfg,
+            'dataset': self.dataset_cfg,
+            'optim': self.optim,
             'work_dir': self.save_dir,
             'device': str(self.device),
             'seed': torch.initial_seed(),
@@ -100,12 +113,11 @@ class Runner:
         Args:
             filename (str): Name of the file to save the model.
         """
-        torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'history': self.history
-        }, os.path.join(self.save_dir, filename))
+        torch.save({'metrics': self.history}, os.path.join(self.save_dir, 'metrics.pth'))
+        torch.save({'optmizer_state': self.optim.state_dict()}, os.path.join(self.save_dir, 'optimizer.pth'))
+        self.model.save_checkpoint(path=os.path.join(self.save_dir, filename))
         print(f"Model saved to {os.path.join(self.save_dir, filename)}")
+        return os.path.join(self.save_dir, filename)
 
 
     def run(self,
@@ -157,10 +169,13 @@ class Runner:
 
             if epoch % val_interval == 0:
                 evals = self.evaluate(self.val_data, epoch=epoch, batch_size=1, loss=True)
+
                 if self.save_dir:
                     if evals['val_loss'] < min(self.history['val_loss'], default=float('inf')):
-                        self.save_model(filename='best_model.pth')
+                        path = self.save_model(filename='best_model.pth')
+                        self.best_model_path = path
                         print(f"Best model saved at epoch {epoch} with val_loss {evals['val_loss']:.4f}")
+
                 # append eval results to history
                 self.history['val_loss'].append(evals['val_loss'])
                 self.history['f1'].append(evals['f1'])
@@ -168,10 +183,42 @@ class Runner:
                 self.history['ap_per_class'].append(evals['ap_per_class'])
             
             self.plot_metrics() # plot metrics after each epoch
-            progress_indication = abs(min(self.history['train_loss'][-15:]) - self.history['train_loss'][-1])
-            if progress_indication < abort_condition and len(self.history['train_loss']) > 15: break
+            if self._check_abort(): break
             
         return self.history
+    
+    def _check_abort(self,
+                 delta: float = 0.05,
+                 patience: int = 10,
+                 metric: str = 'val_loss',
+                 direction: str = 'min') -> bool:
+        values = self.history.get(metric, [])
+        # need at least patience+1 points (so you have a baseline + window)
+        if len(values) < patience + 1:
+            return False
+
+        # take the last (patience+1) values
+        window = values[-(patience + 1):]
+        baseline, *rest = window  # baseline is the oldest in that window
+
+        if direction == 'min':
+            # did we ever drop by at least delta?
+            if min(rest) <= baseline - delta:
+                return False  # there was a decent improvement
+            print(f"Early stopping: no drop ≥{delta} in last {patience} epochs of {metric}.")
+            return True
+
+        elif direction == 'max':
+            # did we ever rise by at least delta?
+            if max(rest) >= baseline + delta:
+                return False
+            print(f"Early stopping: no rise ≥{delta} in last {patience} epochs of {metric}.")
+            return True
+
+        else:
+            raise ValueError("direction must be 'min' or 'max'")
+
+
     def plot_metrics(self):
         """
         Plots training and validation metrics and saves the plot.
@@ -244,11 +291,11 @@ class Runner:
             imgs = batch['image'].to(self.device) # Convert images to device
             labels = batch['label'].to(self.device) # Convert labels to device
 
-            self.optimizer.zero_grad() # Zero the gradients
+            self.optim.zero_grad() # Zero the gradients
             logits = self.model(imgs) # Forward pass
             loss = self.criterion(logits, labels) #! currently unsure whether i will implement a model-specific loss
             loss.backward() # Backward pass
-            self.optimizer.step() # Update weights
+            self.optim.step() # Update weights
 
 
             if i % log_interval == 0:
@@ -259,16 +306,16 @@ class Runner:
                     total_iterations=total_batches,
                     vars={
                         'loss': loss.item(),
-                        'lr': self.optimizer.param_groups[0]['lr'],
+                        'lr': self.optim.param_groups[0]['lr'],
                     },)                
 
             total_loss += loss.item()
         return total_loss / len(loader)
 
     def evaluate(self, dataset, epoch=None, batch_size=1, loss=False):
-        evaluator = Evaluator(self.model, self.device, num_classes=dataset.num_classes, class_names=dataset.class_names)
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
-        y_true, y_pred, y_scores = evaluator.predict(dataloader, loss=True) #predict labels and scores
+        evaluator = build_module(dict(type='BaseEvaluator', device=self.device, batch_size=batch_size, dataset=dataset, model=self.model), EVALUATORS) # Build evaluator from config
+
+        y_true, y_pred, y_scores = evaluator.predict(loss=True) #predict labels and scores
         if loss:
             val_loss = self.criterion(torch.tensor(y_scores), torch.tensor(y_true)).item() # calculate loss if requested (for model saving and overfitting detection)
         else:
@@ -294,11 +341,11 @@ class Runner:
     
     def describe(self):
         """
-        Returns a description of the model, optimizer, and dataset.
+        Returns a description of the model, optim, and dataset.
         """
         return {
             'model': self.model.describe(),
-            'optimizer': self.optimizer.__class__.__name__,
+            'optim': self.optim.__class__.__name__,
             'loading_cfg': self.loading_cfg,
             'data_cfg': self.data_cfg,
             'optim_cfg': self.optim_cfg,

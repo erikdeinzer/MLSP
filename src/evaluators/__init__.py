@@ -1,5 +1,5 @@
-from .base_evaluator import Evaluator
+from .base_evaluator import BaseEvaluator
 
 __all__ = [
-    "Evaluator",
+    "BaseEvaluator",
 ]

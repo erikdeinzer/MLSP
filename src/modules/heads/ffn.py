@@ -1,7 +1,9 @@
 import torch
 from torch import nn
 
+from src.build.registry import MODULES
 
+@MODULES.register_module()
 class FFN(nn.Module):
     def __init__(self, idims, odims, nlayers, hidden_dims=512, dropout_rate=None, **kwargs):
         """

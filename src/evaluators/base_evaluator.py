@@ -5,8 +5,11 @@ from sklearn.preprocessing import label_binarize
 import matplotlib.pyplot as plt
 from src.runner.utils import progress_bar
 
-class Evaluator:
-    def __init__(self, model, device, num_classes, class_names=None, save_dir = None):
+from src.build.registry import EVALUATORS
+
+@EVALUATORS.register_module()
+class BaseEvaluator:
+    def __init__(self, model, dataset, batch_size=1, device='cpu'):
         """
         Args:
             model (torch.nn.Module): Trained model for inference.
@@ -16,10 +19,18 @@ class Evaluator:
         """
         self.model = model.to(device)
         self.device = torch.device(device)
-        self.num_classes = num_classes
-        self.class_names = class_names or [str(i) for i in range(num_classes)]
+        self.batch_size = batch_size
+        self.num_classes = dataset.num_classes
+        self.class_names = dataset.class_names if hasattr(dataset, 'class_names') else [str(i) for i in range(self.num_classes)]
+        self.dataloader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=True
+        )
 
-    def predict(self, dataloader, loss = False, log_interval=50):
+    def predict(self, loss = False, log_interval=50):
         """
         Runs model inference on a DataLoader.
         Returns:
@@ -29,11 +40,11 @@ class Evaluator:
         """
         self.model.eval()
         y_true, y_pred, y_scores = [], [], []
-        total_iterations = len(dataloader)
+        total_iterations = len(self.dataloader)
         if loss:
             hist = []
         with torch.no_grad():
-            for i, batch in enumerate(dataloader):
+            for i, batch in enumerate(self.dataloader):
                 imgs = batch['image'].to(self.device)
                 labels = batch['label'].to(self.device)
                 logits = self.model(imgs)
@@ -45,7 +56,7 @@ class Evaluator:
                     hist.append(val_loss.item())
                     vars = {"val_loss": float(sum(hist) / len(hist))}
 
-                if i % log_interval == 0:
+                if i % log_interval == 0 or i == total_iterations - 1:
                     progress_bar(
                         iteration=i + 1,
                         total_iterations=total_iterations,

@@ -1,3 +1,3 @@
-from .resclass import EuroSATModel
+from .EuroSATModel import EuroSATModel
 
 __all__ = ['EuroSATModel']

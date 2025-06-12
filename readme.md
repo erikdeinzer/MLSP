@@ -84,7 +84,43 @@ model = {
 model = MODULES.build_module(model)
 ```
 
-This way, the architecture gains high level of flexibility. 
+This way, the architecture gains a high level of flexibility. 
+
+
+### Run Model
+
+
+To run the programmed model the user has to provide specific keys in the config dict or instantiate the specific submodules him- or herself.
+
+The **Runner** (src.runner) allows the user build all necessary modules to execute either train, validation or test loops. It takes care of logging and validation steps inside the train loops and also executes the Evaluator.
+
+```pyhon
+def __init__(self, model: nn.Module | dict,
+                 dataloader_cfg: dict,
+                 dataset: nn.Module | dict,
+                 optim: nn.Module | dict,
+                 work_dir: str = None,
+                 device: str = 'cpu', 
+                 seed: int = None,
+                 **kwargs):
+        """
+        Initializes the Runner with model, data, and optimizer configurations.
+        
+        Args:
+            model (nn.Module | dict): Model configuration or instance.
+            dataloader_cfg (dict): Configuration for DataLoader.
+            dataset (nn.Module | dict): Dataset configuration or instance.
+            optim (nn.Module | dict): Optimizer configuration or instance.
+            work_dir (str, optional): Directory to save model and logs. Defaults to None.
+            device (str, optional): Device to run the model on ('cpu' or 'cuda'). Defaults to 'cpu'.
+            seed (int, optional): Random seed for reproducibility. Defaults to None.
+        """
+```
+
+
+
+
+
 
 
 
