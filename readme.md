@@ -117,8 +117,26 @@ def __init__(self, model: nn.Module | dict,
         """
 ```
 
-
-
+The main entrypoint in the model execution is 
+```python
+def run(self,
+            mode: str = 'train',
+            val_interval: int= 10,
+            log_interval: int= 10,
+            epochs: int = 100,
+            start_epoch: int = 1):
+        """
+        Main entry point for running the model.
+        Args:
+            mode (str): 'train', 'validation', or 'test'.
+            val_interval (int): Validation interval in epochs.
+            log_interval (int): Logging interval in batches.
+            epochs (int): Total number of epochs to train.
+            start_epoch (int): Starting epoch for training.
+        Returns:
+            dict: History of training/validation metrics.
+        """
+```
 
 
 
