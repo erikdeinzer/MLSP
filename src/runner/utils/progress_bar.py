@@ -12,12 +12,14 @@ def progress_bar(
         """
         Display a live training progress bar in the console.
         Args:
-            epoch (int): Current epoch number.
-            total_epochs (int): Total number of epochs.
-            loss (float, optional): Training loss.
-            val_loss (float, optional): Validation loss.
-            acc (float, optional): Accuracy.
-            fold (int, optional): Current fold number for K-Fold Cross-Validation.
+            iteration (int): Current iteration number.
+            total_iterations (int): Total number of iterations.
+            epoch (int, optional): Current epoch number.
+            total_epochs (int, optional): Total number of epochs.
+            vars (dict, optional): Dictionary of variables to display.
+            prefix (str, optional): Prefix string to display before the progress bar.
+            postfix (str, optional): Postfix string to display after the progress bar.
+            style (str, optional): Style of the progress bar ('bar', 'arrow', 'dots').
             bar_width (int, optional): Width of the progress bar.
         """
         progress = iteration / total_iterations

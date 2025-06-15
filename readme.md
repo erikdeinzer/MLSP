@@ -139,6 +139,43 @@ def run(self,
 ```
 
 
+# Specific classes
+
+
+### Models `src.modules.models`
+
+| Module                             | Path                         | Description                                                                 |
+|------------------------------------|------------------------------|-----------------------------------------------------------------------------|
+| **EuroSATModel**                  | `src.model`                  | ResNet backbone with a Feed-Forward Network (FFN) for classification.      |
+
+
+### Datasets `src.datasets`
+| Class        | Description                                                        |
+|--------------|--------------------------------------------------------------------|
+| `EuroSAT`    | EuroSAT dataset loader with `Split` and `DatasetContainer` support. |
+| `ImageNet`   | Tiny ImageNet loader with `Split` and `DatasetContainer` support.   |
+
+
+### Modules `src.modules`
+#### Backbones `src.modules.backbones`
+| Class     | Description                        |
+|-----------|------------------------------------|
+| `ResNet`  | Standard ResNet used as backbone.  |
+#### Heads `src.modules.heads`
+| Class   | Description                           |
+|---------|---------------------------------------|
+| `FFN`   | Basic Feed-Forward Network head.      |
+
+### Runner `src.runner`
+| Class     | Description                                      |
+|-----------|--------------------------------------------------|
+| `Runner`  | Main loop: handles training, validation, testing.|
+
+### Evaluators `src.evaluators`
+| Class           | Description                                                                 |
+|------------------|-----------------------------------------------------------------------------|
+| `BaseEvaluator` | Computes mAP, F1 score, and confusion matrix.|
+
 
 
 
