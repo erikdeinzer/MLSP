@@ -1,61 +1,107 @@
-import torchvision.transforms as transforms
+import src
 
-from src.datasets import EuroSATDataset
-from src.modules.backbones.resnet import ResNet
-from src.modules.heads import FFN
-from src.modules.models import EuroSATModel
 from src.runner import Runner
-import os
-
-import kagglehub, os
-
-# Download latest version
-path = kagglehub.dataset_download("apollo2506/eurosat-dataset")
-
-print("Path to dataset files:", path)
+device = 'cuda:0'
 
 
-transform = transforms.Compose([
-    transforms.Resize((128, 128)),
-    transforms.ToTensor(),
-])
+# ----------------------------------
+# Base Configurations
+# ----------------------------------
 
-loading_cfg = {
-    'batch_size': 1024,
-    'num_workers': 4,
-}
+loading_cfg = dict(
+    batch_size=512,
+    num_workers=4,
+)
 
-data_cfg = {
-    'root_dir': os.path.join(path, 'EuroSAT'),
-    'transform': transform,
-}
+eurosat_cfg = dict(
+    type='EuroSATDataset',
+    transform=[
+        dict(type='Resize', size=(128, 128)),
+        dict(type='ToTensor'),
+    ]
+)
 
-optim_cfg = {
-    'lr': 0.001,
-    'weight_decay': 1e-4,
-}
+imagenet_cfg = dict(
+    type='ImageNetDataset',
+    transform=[
+        dict(type='Resize', size=(128, 128)),
+        dict(type='ToTensor'),
+    ]
+)
+
+optim_cfg = dict(
+    type='Adam',
+    lr=0.001,
+    weight_decay=1e-4,
+)
+
+backbone_cfg = dict(
+    type='ResNet',
+    idims=3,
+    odims=64,
+    base_dims=12,
+    arch=[2, 2, 2, 2],
+    dropout=0.2,
+)
+
+# ------------------------
+# EuroSAT Model Configuration
+# ------------------------
 
 
-model_cfg = {
-    'type': EuroSATModel,
-    'backbone_cfg': {
-        'type': ResNet,
-        'idims': 3,
-        'odims': 64,
-        'base_dims': 12,
-        'arch': [2,2,2,2],
-        'dropout': 0.2,
-    },
-    'head_cfg': {
-        'type': FFN,
-        'idims': 64,
-        'odims': 10, # Number of classes in EuroSAT dataset
-        'hidden_dims': 1024,
-        'nlayers':6,
-        'dropout': 0.2,
-    }
-}
+# -----------------------------------
+# Vanilla EuroSAT model configuration
+# -----------------------------------
 
-runner = Runner(model_cfg=model_cfg, loading_cfg=loading_cfg, data_cfg=data_cfg, optim_cfg=optim_cfg, device='cuda:2', work_dir='results/eurosat')
+eurosat_model_cfg = dict(
+    type='EuroSATModel',
+    backbone_cfg=backbone_cfg,
+    head_cfg=dict(
+        type='FFN',
+        idims=64,
+        odims=10,  # EuroSAT has 10 classes
+        hidden_dims=1024,
+        nlayers=6,
+        dropout=0.2,
+    )
+)
+# -----------------------------------
+# Tiny ImageNet model configuration
+# -----------------------------------
+imagenet_model_cfg = dict(
+    type='EuroSATModel',
+    backbone_cfg=backbone_cfg,
+    head_cfg=dict(
+        type='FFN',
+        idims=64,
+        odims=200,  # Tiny ImageNet has 200 classes
+        hidden_dims=1024,
+        nlayers=6,
+        dropout=0.2,
+    )
+)
 
+# -----------------------------------
+# TFL EuroSAT model configuration
+# -----------------------------------
+tfl_eurosat_model_cfg = dict(
+    type='EuroSATModel',
+    backbone_cfg=backbone_cfg,
+    head_cfg=dict(
+        type='FFN',
+        idims=64,
+        odims=10,  # EuroSAT has 10 classes
+        hidden_dims=1024,
+        nlayers=6,
+        dropout=0.2,
+    ),
+    ckpt=dict(
+        path = '/mmdetection3d/PRIVATE/MLSP/results/tiny_imnet/run_20250613-065115/best_model.pth',
+        load_head=False,
+        load_backbone=True,
+        strict=True,
+    )
+)
+
+runner = Runner(model=tfl_eurosat_model_cfg, dataloader_cfg=loading_cfg, dataset=eurosat_cfg, optim=optim_cfg, device=device, work_dir='results/eurosat_tfl')
 runner.run(mode='train', val_interval=1, log_interval=1, epochs=100, start_epoch=1)

@@ -21,6 +21,11 @@ class Runner:
                  work_dir: str = None,
                  device: str = 'cpu', 
                  seed: int = None,
+                 patience: int = 15,
+                 abort_condition: float = 0.05,
+                 direction: str = 'min',
+                 metric: str = 'val_loss',
+                 save_best: bool = True,
                  **kwargs):
         """
         Initializes the Runner with model, data, and optimizer configurations.
@@ -51,31 +56,29 @@ class Runner:
             np.random.seed(seed)
             print(f"No seed provided, using initial seed: {seed}")
 
-
         self.device = torch.device(device)
 
-                
         self.dataloader_cfg = dataloader_cfg
-        
-        
         self.model = build_module(self.model_cfg, MODULES).to(self.device)
+        self.model.print_param_summary()
+        self.criterion = self.model.criterion
 
-        self.best_model_path = None  # Placeholder for the best model
-        
+
         self.optim = build_module(optim, OPTIMIZERS, params=self.model.parameters())
-
         datasets = build_module(self.dataset_cfg, DATASETS)  # Build dataset from config
         self.train_data = datasets.train_data
         self.val_data = datasets.val_data
         self.test_data = datasets.test_data
 
-
-        self.model.print_param_summary()
-
-        self.criterion = self.model.criterion
-
+        self.evaluator = build_module(dict(type='BaseEvaluator', dataset=self.val_data), EVALUATORS)
         self.batch_size = self.dataloader_cfg['batch_size']
 
+        self.patience = patience
+        self.abort_condition = abort_condition
+        self.direction = direction
+        self.metric = metric
+        self.save_best = save_best
+        self.best_model_path = None
        
         if work_dir:
             timestamp = time.strftime("%Y%m%d-%H%M%S")
@@ -144,14 +147,14 @@ class Runner:
             return self.evaluate(self.val_data, batch_size=1)
 
         elif mode == 'test':
-            return self.evaluate(self.test_data, batch_size=self.batch_size)
+            return self.predict(self.test_data, batch_size=self.batch_size, loss=False)
 
         else:
             raise ValueError("Mode must be 'train', 'validation', or 'test'.")
         
         
 
-    def _train_loop(self, start, epochs, val_interval, log_interval, abort_condition=0.05):
+    def _train_loop(self, start, epochs, val_interval, log_interval):
         """Main training loop.
         Args:
             start (int): Starting epoch.
@@ -168,13 +171,20 @@ class Runner:
             self.history['train_loss'].append(train_loss)
 
             if epoch % val_interval == 0:
-                evals = self.evaluate(self.val_data, epoch=epoch, batch_size=1, loss=True)
+                evals = self.evaluate(self.val_data, epoch=epoch, batch_size=1)
 
-                if self.save_dir:
-                    if evals['val_loss'] < min(self.history['val_loss'], default=float('inf')):
+                if self.save_dir and self.save_best:
+                    if self.direction == 'min':
+                        cond = evals[self.metric] < min(self.history[self.metric], default=float('inf'))	
+                    elif self.direction == 'max':
+                        cond = evals[self.metric] > max(self.history[self.metric], default=float('-inf'))
+                    else:
+                        raise ValueError("direction must be 'min' or 'max'")
+
+                    if cond:
                         path = self.save_model(filename='best_model.pth')
                         self.best_model_path = path
-                        print(f"Best model saved at epoch {epoch} with val_loss {evals['val_loss']:.4f}")
+                        print(f"Best model saved at epoch {epoch} with {self.metric} {evals[self.metric]:.4f}")
 
                 # append eval results to history
                 self.history['val_loss'].append(evals['val_loss'])
@@ -187,37 +197,170 @@ class Runner:
             
         return self.history
     
-    def _check_abort(self,
-                 delta: float = 0.05,
-                 patience: int = 10,
-                 metric: str = 'val_loss',
-                 direction: str = 'min') -> bool:
-        values = self.history.get(metric, [])
+    def _check_abort(self) -> bool:
+        values = self.history.get(self.metric, [])
         # need at least patience+1 points (so you have a baseline + window)
-        if len(values) < patience + 1:
+        if len(values) < self.patience + 1:
             return False
 
         # take the last (patience+1) values
-        window = values[-(patience + 1):]
+        window = values[-(self.patience + 1):]
         baseline, *rest = window  # baseline is the oldest in that window
 
-        if direction == 'min':
+        if self.direction == 'min':
             # did we ever drop by at least delta?
-            if min(rest) <= baseline - delta:
+            if min(rest) <= baseline - self.abort_condition:
                 return False  # there was a decent improvement
-            print(f"Early stopping: no drop ≥{delta} in last {patience} epochs of {metric}.")
+            print(f"Early stopping: no drop ≥{self.abort_condition} in last {self.patience} epochs of {self.metric}.")
             return True
 
-        elif direction == 'max':
+        elif self.direction == 'max':
             # did we ever rise by at least delta?
-            if max(rest) >= baseline + delta:
+            if max(rest) >= baseline + self.abort_condition:
                 return False
-            print(f"Early stopping: no rise ≥{delta} in last {patience} epochs of {metric}.")
+            print(f"Early stopping: no rise ≥{self.abort_condition} in last {self.patience} epochs of {self.metric}.")
             return True
 
         else:
             raise ValueError("direction must be 'min' or 'max'")
 
+    def _train_epoch(self, loader, epoch, total_epochs, log_interval=10):
+        """
+        Runs a single training epoch.
+        Args:
+            loader (DataLoader): DataLoader for training data.
+            epoch (int): Current epoch number.
+            total_epochs (int): Total number of epochs.
+            log_interval (int): Interval for logging progress.
+        """
+        self.model.train() # Set model to training mode
+        total_loss = 0.
+        total_batches = len(loader)
+
+        for i, batch in enumerate(loader):
+            imgs = batch['image'].to(self.device) # Convert images to device
+            labels = batch['label'].to(self.device) # Convert labels to device
+
+            self.optim.zero_grad() # Zero the gradients
+            logits = self.model(imgs) # Forward pass
+            loss = self.criterion(logits, labels) #! currently unsure whether i will implement a model-specific loss
+            loss.backward() # Backward pass
+            self.optim.step() # Update weights
+
+
+            if i % log_interval == 0:
+                progress_bar(
+                    epoch=epoch, 
+                    total_epochs=total_epochs,
+                    iteration=i+1,
+                    total_iterations=total_batches,
+                    vars={
+                        'loss': loss.item(),
+                        'lr': self.optim.param_groups[0]['lr'],
+                    },)                
+
+            total_loss += loss.item()
+        return total_loss / len(loader)
+    
+    def predict(self, dataset, batch_size=1, loss=True, log_interval=50):
+        """
+        Runs model inference on a dataset.
+        Args:
+            dataset (nn.Module | dict): Dataset configuration or instance.
+            batch_size (int): Batch size for inference.
+        Returns:
+            np.ndarray: Predicted labels.
+        """
+        """
+        Runs model inference on a DataLoader.
+        Returns:
+            y_true (np.ndarray): True labels shape (N,).
+            y_pred (np.ndarray): Predicted labels shape (N,).
+            y_scores (np.ndarray): Predicted probabilities shape (N, num_classes).
+        """
+        self.model.eval()
+        loader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False)
+        total_iterations = len(loader)
+        if loss:
+            return_dict = {'y_pred': [], 'y_scores': [],'y_true': [] ,'val_loss': [], 'mean_loss': 0.0}
+        else: 
+            return_dict = {'y_pred': [], 'y_scores': []}
+        with torch.no_grad():
+            for i, batch in enumerate(loader):
+                imgs = batch['image'].to(self.device)
+                
+                logits = self.model(imgs)
+                
+                probs = torch.softmax(logits, dim=1)
+                preds = probs.argmax(dim=1)
+
+                return_dict['y_pred'].extend(preds.cpu().numpy())
+                return_dict['y_scores'].extend(probs.cpu().numpy())
+                if loss:
+                    labels = batch['label'].to(self.device)
+                    return_dict['y_true'].extend(labels.cpu().numpy())
+
+                    val_loss = self.model.criterion(logits, labels)
+                    return_dict['val_loss'].append(val_loss.item())
+
+                if i % log_interval == 0 or i == total_iterations - 1:
+                    mean_loss = float(sum(return_dict['val_loss']) / len(return_dict['val_loss'])) if loss else None
+                    return_dict['mean_loss'] = mean_loss
+                    vars = {
+                        'val_loss': mean_loss,
+                    } if loss else None
+                    progress_bar(
+                        iteration=i + 1,
+                        total_iterations=total_iterations,
+                        prefix="Evaluating",
+                        postfix=f" {((i+1)/total_iterations)*100:.2f}%",
+                        vars=vars if loss else None,
+                        style="arrow"
+                    )
+                
+
+        return return_dict
+
+    def evaluate(self, dataset, epoch=None, batch_size=1, log_interval=50):
+        prediction = self.predict(dataset, batch_size=batch_size, loss=True, log_interval=log_interval) # Run inference on the dataset
+
+        y_true = np.array(prediction['y_true']) # True labels
+        y_pred = np.array(prediction['y_pred']) # Predicted labels
+        y_scores = np.array(prediction['y_scores']) # Predicted probabilities
+        val_loss = float(prediction['mean_loss']) # Mean validation loss
+
+
+        f1 = self.evaluator.compute_f1(y_true, y_pred) # compute F1 score
+        mean_ap, ap_per_class = self.evaluator.compute_map(y_true, y_scores) # compute mean Average Precision (mAP)
+
+        # Print confusion matrix if save_dir is set
+        if self.save_dir and epoch is not None:
+            fig = self.evaluator.plot_confusion_matrix(y_true, y_pred)
+            filename = f'ep_{epoch}_cmatrix.png'
+            fig.savefig(os.path.join(self.save_dir, filename))
+            plt.close(fig)
+        
+        print(f" --> F1: {f1:.4f} | mAP: {mean_ap:.4f}") 
+
+        return {
+            'val_loss': val_loss,
+            'f1': f1,
+            'mean_ap': mean_ap,
+            'ap_per_class': ap_per_class
+        }
+    
+    def describe(self):
+        """
+        Returns a description of the model, optim, and dataset.
+        """
+        return {
+            'model': self.model.describe(),
+            'optim_cfg': self.optim_cfg,
+            'dataloader_cfg': self.dataloader_cfg,
+            'dataset_cfg': self.dataset_cfg,
+            'device': str(self.device),
+        }
+    
 
     def plot_metrics(self):
         """
@@ -270,84 +413,3 @@ class Runner:
         plt.tight_layout()
         plt.savefig(os.path.join(self.save_dir, 'map.png'))
         plt.close(fig)
-
-
-
-
-    def _train_epoch(self, loader, epoch, total_epochs, log_interval=10):
-        """
-        Runs a single training epoch.
-        Args:
-            loader (DataLoader): DataLoader for training data.
-            epoch (int): Current epoch number.
-            total_epochs (int): Total number of epochs.
-            log_interval (int): Interval for logging progress.
-        """
-        self.model.train() # Set model to training mode
-        total_loss = 0.
-        total_batches = len(loader)
-
-        for i, batch in enumerate(loader):
-            imgs = batch['image'].to(self.device) # Convert images to device
-            labels = batch['label'].to(self.device) # Convert labels to device
-
-            self.optim.zero_grad() # Zero the gradients
-            logits = self.model(imgs) # Forward pass
-            loss = self.criterion(logits, labels) #! currently unsure whether i will implement a model-specific loss
-            loss.backward() # Backward pass
-            self.optim.step() # Update weights
-
-
-            if i % log_interval == 0:
-                progress_bar(
-                    epoch=epoch, 
-                    total_epochs=total_epochs,
-                    iteration=i+1,
-                    total_iterations=total_batches,
-                    vars={
-                        'loss': loss.item(),
-                        'lr': self.optim.param_groups[0]['lr'],
-                    },)                
-
-            total_loss += loss.item()
-        return total_loss / len(loader)
-
-    def evaluate(self, dataset, epoch=None, batch_size=1, loss=False):
-        evaluator = build_module(dict(type='BaseEvaluator', device=self.device, batch_size=batch_size, dataset=dataset, model=self.model), EVALUATORS) # Build evaluator from config
-
-        y_true, y_pred, y_scores = evaluator.predict(loss=True) #predict labels and scores
-        if loss:
-            val_loss = self.criterion(torch.tensor(y_scores), torch.tensor(y_true)).item() # calculate loss if requested (for model saving and overfitting detection)
-        else:
-            val_loss = None
-        f1 = evaluator.compute_f1(y_true, y_pred) # compute F1 score
-        mean_ap, ap_per_class = evaluator.compute_map(y_true, y_scores) # compute mean Average Precision (mAP)
-
-        # Print confusion matrix if save_dir is set
-        if self.save_dir and epoch is not None:
-            fig = evaluator.plot_confusion_matrix(y_true, y_pred)
-            filename = f'ep_{epoch}_cmatrix.png'
-            fig.savefig(os.path.join(self.save_dir, filename))
-            plt.close(fig)
-        
-        print(f" --> F1: {f1:.4f} | mAP: {mean_ap:.4f}") 
-
-        return {
-            'val_loss': val_loss,
-            'f1': f1,
-            'mean_ap': mean_ap,
-            'ap_per_class': ap_per_class
-        }
-    
-    def describe(self):
-        """
-        Returns a description of the model, optim, and dataset.
-        """
-        return {
-            'model': self.model.describe(),
-            'optim': self.optim.__class__.__name__,
-            'loading_cfg': self.loading_cfg,
-            'data_cfg': self.data_cfg,
-            'optim_cfg': self.optim_cfg,
-            'device': str(self.device),
-        }

@@ -9,7 +9,7 @@ from src.build.registry import EVALUATORS
 
 @EVALUATORS.register_module()
 class BaseEvaluator:
-    def __init__(self, model, dataset, batch_size=1, device='cpu'):
+    def __init__(self, dataset):
         """
         Args:
             model (torch.nn.Module): Trained model for inference.
@@ -17,60 +17,8 @@ class BaseEvaluator:
             num_classes (int): Number of target classes.
             class_names (list[str], optional): Names of classes for plots.
         """
-        self.model = model.to(device)
-        self.device = torch.device(device)
-        self.batch_size = batch_size
         self.num_classes = dataset.num_classes
         self.class_names = dataset.class_names if hasattr(dataset, 'class_names') else [str(i) for i in range(self.num_classes)]
-        self.dataloader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=4,
-            pin_memory=True
-        )
-
-    def predict(self, loss = False, log_interval=50):
-        """
-        Runs model inference on a DataLoader.
-        Returns:
-            y_true (np.ndarray): True labels shape (N,).
-            y_pred (np.ndarray): Predicted labels shape (N,).
-            y_scores (np.ndarray): Predicted probabilities shape (N, num_classes).
-        """
-        self.model.eval()
-        y_true, y_pred, y_scores = [], [], []
-        total_iterations = len(self.dataloader)
-        if loss:
-            hist = []
-        with torch.no_grad():
-            for i, batch in enumerate(self.dataloader):
-                imgs = batch['image'].to(self.device)
-                labels = batch['label'].to(self.device)
-                logits = self.model(imgs)
-                
-                probs = torch.softmax(logits, dim=1)
-                preds = probs.argmax(dim=1)
-                if loss:
-                    val_loss = self.model.criterion(logits, labels)
-                    hist.append(val_loss.item())
-                    vars = {"val_loss": float(sum(hist) / len(hist))}
-
-                if i % log_interval == 0 or i == total_iterations - 1:
-                    progress_bar(
-                        iteration=i + 1,
-                        total_iterations=total_iterations,
-                        prefix="Evaluating",
-                        postfix=f" {((i+1)/total_iterations)*100:.2f}%",
-                        vars=vars if loss else None,
-                        style="arrow"
-                    )
-
-                y_true.extend(labels.cpu().numpy())
-                y_pred.extend(preds.cpu().numpy())
-                y_scores.extend(probs.cpu().numpy())
-
-        return np.array(y_true), np.array(y_pred), np.array(y_scores)
 
     def compute_f1(self, y_true, y_pred, average='macro'):
         """Compute F1 score."""
