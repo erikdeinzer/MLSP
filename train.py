@@ -1,107 +1,47 @@
-import src
 
+import importlib.util
+import sys
+import os
+from types import ModuleType
 from src.runner import Runner
-device = 'cuda:0'
 
 
-# ----------------------------------
-# Base Configurations
-# ----------------------------------
-
-loading_cfg = dict(
-    batch_size=512,
-    num_workers=4,
-)
-
-eurosat_cfg = dict(
-    type='EuroSATDataset',
-    transform=[
-        dict(type='Resize', size=(128, 128)),
-        dict(type='ToTensor'),
-    ]
-)
-
-imagenet_cfg = dict(
-    type='ImageNetDataset',
-    transform=[
-        dict(type='Resize', size=(128, 128)),
-        dict(type='ToTensor'),
-    ]
-)
-
-optim_cfg = dict(
-    type='Adam',
-    lr=0.001,
-    weight_decay=1e-4,
-)
-
-backbone_cfg = dict(
-    type='ResNet',
-    idims=3,
-    odims=64,
-    base_dims=12,
-    arch=[2, 2, 2, 2],
-    dropout=0.2,
-)
-
-# ------------------------
-# EuroSAT Model Configuration
-# ------------------------
+def load_config_module(path: str) -> ModuleType:
+    path = os.path.abspath(path)
+    spec = importlib.util.spec_from_file_location("cfg_module", path)
+    cfg_module = importlib.util.module_from_spec(spec)
+    sys.modules["cfg_module"] = cfg_module
+    spec.loader.exec_module(cfg_module)
+    return cfg_module
 
 
-# -----------------------------------
-# Vanilla EuroSAT model configuration
-# -----------------------------------
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        raise ValueError("Usage: python train.py path/to/config.py")
+    
+    config_path = sys.argv[1]
+    cfg = load_config_module(config_path)
 
-eurosat_model_cfg = dict(
-    type='EuroSATModel',
-    backbone_cfg=backbone_cfg,
-    head_cfg=dict(
-        type='FFN',
-        idims=64,
-        odims=10,  # EuroSAT has 10 classes
-        hidden_dims=1024,
-        nlayers=6,
-        dropout=0.2,
-    )
-)
-# -----------------------------------
-# Tiny ImageNet model configuration
-# -----------------------------------
-imagenet_model_cfg = dict(
-    type='EuroSATModel',
-    backbone_cfg=backbone_cfg,
-    head_cfg=dict(
-        type='FFN',
-        idims=64,
-        odims=200,  # Tiny ImageNet has 200 classes
-        hidden_dims=1024,
-        nlayers=6,
-        dropout=0.2,
-    )
-)
+    # Access your configs:
+    loading_cfg = cfg.loading_cfg
+    optim_cfg = cfg.optim_cfg
+    model_cfg = cfg.model_cfg
+    dataset_cfg = cfg.dataset_cfg
+    device = cfg.device if hasattr(cfg, 'device') else 'cuda'
+    workdir = cfg.work_dir if hasattr(cfg, 'work_dir') else 'results'
 
-# -----------------------------------
-# TFL EuroSAT model configuration
-# -----------------------------------
-tfl_eurosat_model_cfg = dict(
-    type='EuroSATModel',
-    backbone_cfg=backbone_cfg,
-    head_cfg=dict(
-        type='FFN',
-        idims=64,
-        odims=10,  # EuroSAT has 10 classes
-        hidden_dims=1024,
-        nlayers=6,
-        dropout=0.2,
-    ),
-    ckpt=dict(
-        path = '/mmdetection3d/PRIVATE/MLSP/results/tiny_imnet/run_20250613-065115/best_model.pth',
-        load_head=False,
-        load_backbone=True,
-        strict=True,
-    )
-)
+    print("Loaded config:")
+    print(f"Batch size: {loading_cfg['batch_size']}")
+    print(f"Optimizer type: {optim_cfg['type']}")
+    print(f"Model head output dims: {model_cfg['head_cfg']['odims']}")
 
-runner = Runner(model=tfl_eurosat_model_cfg, dataloader_cfg=loading_cfg, dataset=eurosat_cfg, optim=optim_cfg, device=device, work_dir='results/eurosat_tfl')
-runner.run(mode='train', val_interval=1, log_interval=1, epochs=100, start_epoch=1)
+    runner = Runner(
+        model=model_cfg, 
+        dataloader_cfg=loading_cfg, 
+        dataset=dataset_cfg, 
+        optim=optim_cfg, 
+        device=device, 
+        work_dir=workdir)
+    
+    runner.run(mode='train', val_interval=1, log_interval=1, epochs=100, start_epoch=1)
+
