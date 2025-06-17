@@ -1,7 +1,5 @@
-loading_cfg = dict(
-    batch_size=512,
-    num_workers=4,
-)
+dataset = 'EuroSATDataset'
+batch_size = 512
 
 optim_cfg = dict(
     type='Adam',
@@ -18,15 +16,32 @@ backbone_cfg = dict(
     dropout=0.2,
 )
 
-dataset_cfg = dict(
-    type='EuroSATDataset',
-    transform=[
+train_dataloader = dict(
+    pipeline=[
         dict(type='Resize', size=(128, 128)),
         dict(type='RandAugment', num_ops=2, magnitude=9),
         dict(type='ToTensor'),
         dict(type='Normalize', mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ]
+    ],
+    batch_size=batch_size,
+    num_workers=4,
+    shuffle=True,
+    drop_last=True,
 )
+
+val_dataloader = dict(
+    pipeline =[
+        dict(type='Resize', size=(128, 128)),
+        dict(type='ToTensor'),
+        dict(type='Normalize', mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ],
+    batch_size=1,
+    num_workers=4,
+    shuffle=False,
+    drop_last=False,
+)
+
+test_dataloader = val_dataloader.copy()
 
 model_cfg = dict(
     type='EuroSATModel',
@@ -40,3 +55,6 @@ model_cfg = dict(
         dropout=0.2,
     )
 )
+
+work_dir = 'results/eurosat/'
+device = 'cuda:3'

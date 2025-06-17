@@ -20,7 +20,7 @@ class ImageNetTrainSplit(ImageDatasetSplit):
         
         self.dir = os.path.join(self.root_dir, 'tiny-imagenet-200', 'train')        
     
-        self.ds = ImageFolder(root=self.dir, transform=self.transform)
+        self.ds = ImageFolder(root=self.dir, transform=self.pipeline)
         self.class_names = self.ds.classes
         self.class_to_idx= {syn: idx for idx, syn in enumerate(self.class_names)}
 
@@ -80,10 +80,11 @@ class ImageNetDataset(CustomDataset):
     
     Should be downloaded from Kaggle: https://www.kaggle.com/datasets/akash2sharma/tiny-imagenet
     """
-    def __init__(self, name='akash2sharma/tiny-imagenet', **kwargs):
+    def __init__(self, train_pipeline, val_pipeline, test_pipeline, name='akash2sharma/tiny-imagenet', **kwargs):
         super().__init__(name=name, **kwargs)
         
         self.root_dir = os.path.join(self.root_dir, 'tiny-imagenet-200')
-        self.train_data = ImageNetTrainSplit(root_dir = self.root_dir, **kwargs)
-        self.val_data = ImageNetValSplit(root_dir = self.root_dir, cls_to_idx=self.train_data.class_to_idx, **kwargs)
-        self.test_data = ImageNetTestSplit(root_dir = self.root_dir, **kwargs)
+
+        self.train_data = ImageNetTrainSplit(root_dir = self.root_dir, pipeline = train_pipeline, **kwargs)
+        self.val_data = ImageNetValSplit(root_dir = self.root_dir, cls_to_idx=self.train_data.class_to_idx, pipeline = val_pipeline, **kwargs)
+        self.test_data = ImageNetTestSplit(root_dir = self.root_dir, pipeline = test_pipeline, **kwargs)

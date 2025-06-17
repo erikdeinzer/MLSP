@@ -2,7 +2,9 @@ import torch
 import numpy as np
 from sklearn.metrics import f1_score, average_precision_score, confusion_matrix
 from sklearn.preprocessing import label_binarize
+import matplotlib
 import matplotlib.pyplot as plt
+matplotlib.use('Agg')
 from src.runner.utils import progress_bar
 
 from src.build.registry import EVALUATORS

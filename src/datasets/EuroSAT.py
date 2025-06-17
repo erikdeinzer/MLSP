@@ -34,12 +34,12 @@ class EuroSATDataset(CustomDataset):
     
     Should be downloaded from Kaggle: https://www.kaggle.com/dataseWts/apollo2506/eurosat-dataset
     """
-    def __init__(self, name='apollo2506/eurosat-dataset', **kwargs):
+    def __init__(self, train_pipeline, val_pipeline, test_pipeline, name='apollo2506/eurosat-dataset', **kwargs):
         super().__init__(name, **kwargs)
 
         self.root_dir = os.path.join(self.root_dir, 'EuroSAT')
-        self.train_data = EuroSATSplit(root_dir = self.root_dir, split='train', **kwargs)
-        self.val_data = EuroSATSplit(root_dir = self.root_dir, split='validation', **kwargs)
-        self.test_data = EuroSATSplit(root_dir = self.root_dir, split='test', **kwargs)
+        self.train_data = EuroSATSplit(root_dir = self.root_dir, split='train', pipeline = train_pipeline, **kwargs)
+        self.val_data = EuroSATSplit(root_dir = self.root_dir, split='validation', pipeline = val_pipeline,**kwargs)
+        self.test_data = EuroSATSplit(root_dir = self.root_dir, split='test', pipeline = test_pipeline,**kwargs)
     
     

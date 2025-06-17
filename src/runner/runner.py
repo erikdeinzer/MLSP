@@ -2,8 +2,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 import os
+import matplotlib
 import matplotlib.pyplot as plt
-
+matplotlib.use('Agg')
 from torch.utils.data import DataLoader
 
 from src.runner.utils import progress_bar
@@ -14,10 +15,13 @@ from src.build.registry import build_module
 
 
 class Runner:
-    def __init__(self, model: nn.Module | dict,
-                 dataloader_cfg: dict,
+    def __init__(self, 
+                 model: nn.Module | dict,
                  dataset: nn.Module | dict,
+                 train_dataloader: dict,
+                 val_dataloader: dict,
                  optim: nn.Module | dict,
+                 test_dataloader: dict = None,
                  work_dir: str = None,
                  device: str = 'cpu', 
                  seed: int = None,
@@ -40,8 +44,9 @@ class Runner:
             seed (int, optional): Random seed for reproducibility. Defaults to None.
         """
         self.model_cfg = model
-        self.dataloader_cfg = dataloader_cfg
-        self.dataset_cfg = dataset
+        self.train_dataloader = train_dataloader
+        self.val_dataloader = val_dataloader
+        self.test_dataloader = test_dataloader if test_dataloader is not None else {}
         self.optim_cfg = optim
         
         if seed is not None:
@@ -55,23 +60,32 @@ class Runner:
             torch.manual_seed(seed)
             np.random.seed(seed)
             print(f"No seed provided, using initial seed: {seed}")
+        self.seed = seed
 
         self.device = torch.device(device)
 
-        self.dataloader_cfg = dataloader_cfg
         self.model = build_module(self.model_cfg, MODULES).to(self.device)
         self.model.print_param_summary()
         self.criterion = self.model.criterion
 
-
         self.optim = build_module(optim, OPTIMIZERS, params=self.model.parameters())
-        datasets = build_module(self.dataset_cfg, DATASETS)  # Build dataset from config
+        
+        train_pipeline = self.train_dataloader.pop('pipeline')
+        val_pipeline = self.val_dataloader.pop('pipeline')
+        test_pipeline = self.test_dataloader.pop('pipeline')
+        
+        datasets = build_module(
+            dict(type=dataset), 
+            DATASETS, 
+            train_pipeline = train_pipeline,
+            test_pipeline = test_pipeline,
+            val_pipeline = val_pipeline) 
+        
         self.train_data = datasets.train_data
         self.val_data = datasets.val_data
         self.test_data = datasets.test_data
 
         self.evaluator = build_module(dict(type='BaseEvaluator', dataset=self.val_data), EVALUATORS)
-        self.batch_size = self.dataloader_cfg['batch_size']
 
         self.patience = patience
         self.abort_condition = abort_condition
@@ -84,31 +98,25 @@ class Runner:
             timestamp = time.strftime("%Y%m%d-%H%M%S")
             self.save_dir = os.path.join(work_dir, f"run_{timestamp}")
             os.makedirs(self.save_dir)
-            self.save_cfg()
+            self.log_variables_to_file(os.path.join(self.save_dir, 'config.py'))
 
         
 
         self.history = {'train_loss': [], 'val_loss': [], 'f1': [], 'mean_ap': [], 'ap_per_class': []}
 
         
-    def save_cfg(self, filename='config.yaml'):
-        """
-        Saves the configuration of the model, optimizer, and dataset to a YAML file.
-        Args:
-            filename (str): Name of the file to save the configuration.
-        """
-        import yaml
-        cfg = {
-            'model': self.model.describe(),
-            'dataloader_cfg': self.dataloader_cfg,
-            'dataset': self.dataset_cfg,
-            'optim': self.optim,
-            'work_dir': self.save_dir,
-            'device': str(self.device),
-            'seed': torch.initial_seed(),
-        }
-        with open(os.path.join(self.save_dir, filename), 'w') as f:
-            yaml.dump(cfg, f, default_flow_style=False)
+    def log_variables_to_file(self, filepath):
+        with open(filepath, 'w') as f:
+            f.write("# Automatically generated run configuration (dicts and basic variables only)\n\n")
+            for key, value in self.__dict__.items():
+                if isinstance(value, (dict, list, tuple, str, int, float, bool, type(None))):
+                    try:
+                        val_str = repr(value)
+                        if isinstance(val_str, str) and len(val_str) > 500:
+                            val_str = val_str[:500] + '...  # truncated'
+                        f.write(f"{key} = {val_str}\n")
+                    except Exception:
+                        f.write(f"# {key} could not be serialized\n")
 
     def save_model(self, filename='ckpt.pth'):
         """
@@ -144,10 +152,10 @@ class Runner:
             return self._train_loop(start_epoch, epochs, val_interval, log_interval)
 
         elif mode == 'validation':
-            return self.evaluate(self.val_data, batch_size=1)
+            return self.evaluate(self.val_data, batch_size=self.val_dataloader['batch_size'])
 
         elif mode == 'test':
-            return self.predict(self.test_data, batch_size=self.batch_size, loss=False)
+            return self.predict(self.test_data, batch_size=self.test_dataloader['batch_size'], loss=False)
 
         else:
             raise ValueError("Mode must be 'train', 'validation', or 'test'.")
@@ -162,7 +170,11 @@ class Runner:
             val_interval (int): Validation interval in epochs.
             log_interval (int): Logging interval in batches.
         """
-        train_loader = DataLoader(self.train_data, batch_size=self.batch_size, shuffle=True)
+        train_loader = DataLoader(self.train_data, 
+                                  batch_size=self.train_dataloader['batch_size'], 
+                                  shuffle=True, 
+                                  num_workers=self.train_dataloader.get('num_workers', 4), 
+                                  pin_memory=self.train_dataloader.get('pin_memory', False))
 
 
         for epoch in range(start, epochs):
@@ -171,7 +183,7 @@ class Runner:
             self.history['train_loss'].append(train_loss)
 
             if epoch % val_interval == 0:
-                evals = self.evaluate(self.val_data, epoch=epoch, batch_size=1)
+                evals = self.evaluate(self.val_data, epoch=epoch)
 
                 if self.save_dir and self.save_best:
                     if self.direction == 'min':
@@ -262,7 +274,7 @@ class Runner:
             total_loss += loss.item()
         return total_loss / len(loader)
     
-    def predict(self, dataset, batch_size=1, loss=True, log_interval=50):
+    def predict(self, dataset, loss=True, log_interval=50, **dl_kwargs):
         """
         Runs model inference on a dataset.
         Args:
@@ -279,7 +291,11 @@ class Runner:
             y_scores (np.ndarray): Predicted probabilities shape (N, num_classes).
         """
         self.model.eval()
-        loader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False)
+        loader = DataLoader(dataset=dataset,
+                            batch_size=dl_kwargs.get('batch_size', 1),
+                            shuffle=False,
+                            num_workers=dl_kwargs.get('num_workers', 4),
+                            pin_memory=dl_kwargs.get('pin_memory', False))
         total_iterations = len(loader)
         if loss:
             return_dict = {'y_pred': [], 'y_scores': [],'y_true': [] ,'val_loss': [], 'mean_loss': 0.0}
@@ -321,8 +337,8 @@ class Runner:
 
         return return_dict
 
-    def evaluate(self, dataset, epoch=None, batch_size=1, log_interval=50):
-        prediction = self.predict(dataset, batch_size=batch_size, loss=True, log_interval=log_interval) # Run inference on the dataset
+    def evaluate(self, dataset, epoch=None, log_interval=50):
+        prediction = self.predict(dataset, loss=True, log_interval=log_interval, **self.val_dataloader) # Run inference on the dataset
 
         y_true = np.array(prediction['y_true']) # True labels
         y_pred = np.array(prediction['y_pred']) # Predicted labels

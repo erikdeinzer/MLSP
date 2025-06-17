@@ -8,14 +8,14 @@ import numpy as np
 from src.build.registry import TRANSFORMS, build_module
 
 class ImageDatasetSplit(Dataset):
-    def __init__(self, split, root_dir, transform=None):
+    def __init__(self, split, root_dir, pipeline=None):
         self.split = split
         self.root_dir = root_dir
-        if transform is None:
-            self.transform = transforms.ToTensor()
+        if pipeline is None:
+            self.pipeline = transforms.ToTensor()
         else:
-            tfs = [build_module(t, TRANSFORMS) for t in transform]
-            self.transform = transforms.Compose(tfs)
+            tfs = [build_module(t, TRANSFORMS) for t in pipeline]
+            self.pipeline = transforms.Compose(tfs)
 
         self.labels = None
         self.image_paths = []
@@ -41,8 +41,8 @@ class ImageDatasetSplit(Dataset):
         
         image = Image.open(image_path).convert("RGB")
 
-        if self.transform:
-            image = self.transform(image)
+        if self.pipeline:
+            image = self.pipeline(image)
         
         if self.labels is not None:
             label = self.labels[idx]
