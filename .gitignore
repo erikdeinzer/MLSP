@@ -1,5 +1,7 @@
 data/*
 
 *.pyc
+*.pth
+*.json
 
-results/*
+venv/*

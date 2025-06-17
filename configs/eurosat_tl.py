@@ -43,7 +43,6 @@ val_dataloader = dict(
 
 test_dataloader = val_dataloader.copy()
 
-
 model_cfg = dict(
     type='EuroSATModel',
     backbone_cfg=backbone_cfg,
@@ -54,5 +53,19 @@ model_cfg = dict(
         hidden_dims=1024,
         nlayers=6,
         dropout=0.2,
+    ),
+    ckpt=dict(
+        path = '/mmdetection3d/PRIVATE/MLSP/results/imagenet/run_20250617-110214/best_model.pth', # Can be replaced with a path to a pre-trained model
+        load_head=False,
+        load_backbone=True,
+        strict=True,
     )
 )
+
+runner_args = dict(
+    metric = 'mean_ap',
+    direction = 'max',
+    patience = 15,
+)
+work_dir = 'results/eurosat_tl/'
+device = 'cuda:0'

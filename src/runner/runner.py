@@ -301,12 +301,14 @@ class Runner:
             return_dict = {'y_pred': [], 'y_scores': [],'y_true': [] ,'val_loss': [], 'mean_loss': 0.0}
         else: 
             return_dict = {'y_pred': [], 'y_scores': []}
+        
+        fps_acc = 0.0 # Initialize FPS accumulator for speed calculation
         with torch.no_grad():
             for i, batch in enumerate(loader):
                 imgs = batch['image'].to(self.device)
-                
+                start = time.time() # Start timer for progress bar
                 logits = self.model(imgs)
-                
+                fps_acc += 1 / (time.time() - start) # Update FPS accumulator
                 probs = torch.softmax(logits, dim=1)
                 preds = probs.argmax(dim=1)
 
@@ -322,9 +324,10 @@ class Runner:
                 if i % log_interval == 0 or i == total_iterations - 1:
                     mean_loss = float(sum(return_dict['val_loss']) / len(return_dict['val_loss'])) if loss else None
                     return_dict['mean_loss'] = mean_loss
-                    vars = {
-                        'val_loss': mean_loss,
-                    } if loss else None
+                    vars = {'FPS': f"{(fps_acc/(i+1)):.2f}"}
+                    if loss:
+                        vars.update({'val_loss': mean_loss})
+                    
                     progress_bar(
                         iteration=i + 1,
                         total_iterations=total_iterations,

@@ -53,5 +53,5 @@ runner_args = dict(
     direction = 'max',
     patience = 15,
 )
-work_dir = 'results/eurosat/'
+work_dir = 'results/baseline/'
 device = 'cuda:0'
