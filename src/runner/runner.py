@@ -221,14 +221,14 @@ class Runner:
 
         if self.direction == 'min':
             # did we ever drop by at least delta?
-            if min(rest) <= baseline - self.abort_condition:
+            if min(rest) <= baseline * (1 - self.abort_condition):
                 return False  # there was a decent improvement
             print(f"Early stopping: no drop ≥{self.abort_condition} in last {self.patience} epochs of {self.metric}.")
             return True
 
         elif self.direction == 'max':
             # did we ever rise by at least delta?
-            if max(rest) >= baseline + self.abort_condition:
+            if max(rest) >= baseline * (1 + self.abort_condition):
                 return False
             print(f"Early stopping: no rise ≥{self.abort_condition} in last {self.patience} epochs of {self.metric}.")
             return True
@@ -259,7 +259,7 @@ class Runner:
             loss.backward() # Backward pass
             self.optim.step() # Update weights
 
-
+            total_loss += loss.item()
             if i % log_interval == 0:
                 progress_bar(
                     epoch=epoch, 
@@ -267,11 +267,11 @@ class Runner:
                     iteration=i+1,
                     total_iterations=total_batches,
                     vars={
-                        'loss': loss.item(),
+                        'loss': total_loss / (i + 1),
                         'lr': self.optim.param_groups[0]['lr'],
                     },)                
 
-            total_loss += loss.item()
+            
         return total_loss / len(loader)
     
     def predict(self, dataset, loss=True, log_interval=50, **dl_kwargs):
@@ -409,6 +409,9 @@ class Runner:
         fig = plt.figure(figsize=(12, 6))
         plt.grid(True)
         plt.plot(epochs, self.history['f1'], label='F1 Score', color='green')
+        max_f1 = max(self.history['f1'])
+        plt.axhline(y=max_f1, color='gray', linestyle='--', label=f'Max F1: {max_f1:.4f}')
+        plt.ylim(0, 1)
         plt.title('F1 Score')
         plt.xlabel('Epochs')
         plt.ylabel('F1 Score')
@@ -422,6 +425,10 @@ class Runner:
         fig = plt.figure(figsize=(12, 6))
         plt.grid(True)
         plt.plot(epochs, self.history['mean_ap'], label='mAP', color='red')
+        # Plot line at max mAP and provide label
+        max_map = max(self.history['mean_ap'])
+        plt.axhline(y=max_map, color='gray', linestyle='--', label=f'Max mAP: {max_map:.4f}')
+        plt.ylim(0, 1)
         plt.title('Mean Average Precision (mAP)')
         plt.xlabel('Epochs')
         plt.ylabel('mAP')

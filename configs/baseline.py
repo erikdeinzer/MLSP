@@ -10,7 +10,7 @@ optim_cfg = dict(
 backbone_cfg = dict(
     type='ResNet',
     idims=3,
-    odims=64,
+    odims=10,
     base_dims=12,
     arch=[2, 2, 2, 2],
     dropout=0.2,
@@ -44,16 +44,8 @@ val_dataloader = dict(
 test_dataloader = val_dataloader.copy()
 
 model_cfg = dict(
-    type='EuroSATModel',
+    type='Baseline',
     backbone_cfg=backbone_cfg,
-    head_cfg=dict(
-        type='FFN',
-        idims=64,
-        odims=10,  # Tiny ImageNet has 200 classes
-        hidden_dims=1024,
-        nlayers=6,
-        dropout=0.2,
-    )
 )
 
 runner_args = dict(
@@ -62,4 +54,4 @@ runner_args = dict(
     patience = 15,
 )
 work_dir = 'results/eurosat/'
-device = 'cuda:3'
+device = 'cuda:0'

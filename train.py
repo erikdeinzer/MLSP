@@ -40,7 +40,7 @@ if __name__ == "__main__":
     print("Loaded config:")
     print(f"Batch size: {train_dataloader['batch_size']}")
     print(f"Optimizer type: {optim_cfg['type']}")
-    print(f"Model head output dims: {model_cfg['head_cfg']['odims']}")
+    #print(f"Model head output dims: {model_cfg['head_cfg']['odims']}")
 
     runner = Runner(
         model=model_cfg, 
